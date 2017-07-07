@@ -17,13 +17,21 @@ parser.add_argument("--batchsize", type=int, default=10)
 parser.add_argument("--adversarial_ratio", type=float, default=0.01)
 parser.add_argument("--outprefix", default="")
 parser.add_argument("--facade", action="store_true")
+parser.add_argument("--random_input", action="store_true")
+parser.add_argument("--generator_bias", type=float, default=100)
+parser.add_argument("--no_concat_decoder", action="store_false", dest="concat_decoder")
+parser.add_argument("--no_concat_discriminator", action="store_false", dest="concat_discriminator")
 args = parser.parse_args()
 
 outdirname = "_".join([
                           args.outprefix,
                           "facade" if args.facade else "",
+                          "random_input" if args.random_input else "",
                           "batch" + str(args.batchsize),
                           "ar" + str(args.adversarial_ratio),
+                          "generator_bias" + str(args.generator_bias),
+                          "no_concat_decoder" if not args.concat_decoder else "",
+                          "no_concat_discriminator" if not args.concat_discriminator else "",
                           str(int(time.time())),
                       ] | pipe.where(lambda x: len(x) > 0))
 OUTPUT_DIRECTORY = os.path.join(os.path.dirname(__file__), "output", outdirname)
@@ -36,10 +44,17 @@ logging.info(args)
 if args.facade:
     dataset = pose2img.dataset.FacadeDataset(dataDir=args.image_dataset)
 else:
-    image_pathes = glob.glob("{}/*.jpg".format(args.image_dataset))
-    ids = [os.path.splitext(os.path.basename(path))[0] for path in image_pathes]
+    # pose_pathes = glob.glob("{}/*_rendered.png".format(args.pose_dataset))
+    # ids = [os.path.basename(path).split("_")[0] for path in pose_pathes]
+    # image_pathes = ["{}/{}.jpg".format(args.image_dataset, image_id) for image_id in ids]
+
+    # image_pathes = glob.glob("{}/*.jpg".format(args.image_dataset))
+    # ids = [os.path.splitext(os.path.basename(path))[0] for path in image_pathes]
     # pose_pathes = ["{}/{}_rendered.png".format(args.pose_dataset, image_id) for image_id in ids]
-    pose_pathes = ["{}/{}.png".format(args.pose_dataset, image_id) for image_id in ids]
+
+    image_pathes = glob.glob("{}/*.png".format(args.image_dataset))
+    ids = [os.path.splitext(os.path.basename(path))[0] for path in image_pathes]
+    pose_pathes = ["{}/{}_rendered.png".format(args.pose_dataset, image_id) for image_id in ids]
 
     image_dataset = pose2img.dataset.ResizedImageDataset(image_pathes, resize=(286, 286))
     pose_dataset = pose2img.dataset.ResizedImageDataset(pose_pathes, resize=(286, 286))
@@ -48,18 +63,29 @@ else:
         crop=256
     )
 
-
 in_channel = 12 if args.facade else 3
 encoder = pose2img.models.Encoder(in_ch=in_channel)
-decoder = pose2img.models.Decoder(out_ch=3)
-discriminator = pose2img.models.Discriminator(in_ch=in_channel, out_ch=3)
+decoder = pose2img.models.Decoder(out_ch=3, will_concat=args.concat_decoder)
+discriminator = pose2img.models.Discriminator(in_ch=in_channel, out_ch=3, will_concat=args.concat_discriminator)
 
-optimizer_encoder = chainer.optimizers.Adam()
-optimizer_encoder.setup(encoder)
-optimizer_decoder = chainer.optimizers.Adam()
-optimizer_decoder.setup(decoder)
-optimizer_discriminator = chainer.optimizers.Adam()
-optimizer_discriminator.setup(discriminator)
+
+def make_optimizer(model, alpha=0.0002, beta1=0.5):
+    optimizer = chainer.optimizers.Adam(alpha=alpha, beta1=beta1)
+    optimizer.setup(model)
+    optimizer.add_hook(chainer.optimizer.WeightDecay(0.00001), 'hook_dec')
+    return optimizer
+
+
+# optimizer_encoder = chainer.optimizers.Adam()
+# optimizer_encoder.setup(encoder)
+# optimizer_decoder = chainer.optimizers.Adam()
+# optimizer_decoder.setup(decoder)
+# optimizer_discriminator = chainer.optimizers.Adam()
+# optimizer_discriminator.setup(discriminator)
+
+optimizer_encoder = make_optimizer(encoder)
+optimizer_decoder = make_optimizer(decoder)
+optimizer_discriminator = make_optimizer(discriminator)
 
 adversarial_ratio = args.adversarial_ratio
 
@@ -75,7 +101,10 @@ else:
 
 iterator = chainer.iterators.SerialIterator(dataset, batch_size=args.batchsize, repeat=True, shuffle=True)
 for i, batch in enumerate(iterator):
-    images = chainer.Variable(xp.array([t[0] for t in batch]))
+    if args.random_input:
+        images = chainer.Variable(xp.array([numpy.random.random(t[0].shape) for t in batch], dtype=xp.float32))
+    else:
+        images = chainer.Variable(xp.array([t[0] for t in batch]))
     poses = chainer.Variable(xp.array([t[1] for t in batch]))
     batchsize, _, w, h = poses.data.shape
     encoded = encoder(poses)  # type: chainer.Variable
@@ -93,7 +122,8 @@ for i, batch in enumerate(iterator):
 
     optimizer_encoder.zero_grads()
     optimizer_decoder.zero_grads()
-    loss_generator = (loss_reconstruction * (1 - adversarial_ratio) + loss_adversarial * adversarial_ratio)
+    loss_generator = args.generator_bias * (
+    loss_reconstruction * (1 - adversarial_ratio) + loss_adversarial * adversarial_ratio)
     loss_generator.backward()
     optimizer_decoder.update()
     optimizer_encoder.update()

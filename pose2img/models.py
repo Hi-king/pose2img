@@ -42,7 +42,7 @@ class Encoder(chainer.Chain):
     def __init__(self, in_ch):
         layers = {}
         w = chainer.initializers.Normal(0.02)
-        layers['c0'] = F.Convolution2D(in_ch, 64, 3, 1, 1, initialW=w)
+        layers['c0'] = L.Convolution2D(in_ch, 64, 3, 1, 1, initialW=w)
         layers['c1'] = CBR(64, 128, bn=True, sample='down', activation=F.leaky_relu, dropout=False)
         layers['c2'] = CBR(128, 256, bn=True, sample='down', activation=F.leaky_relu, dropout=False)
         layers['c3'] = CBR(256, 512, bn=True, sample='down', activation=F.leaky_relu, dropout=False)
@@ -59,23 +59,26 @@ class Encoder(chainer.Chain):
         return hs
 
 class Decoder(chainer.Chain):
-    def __init__(self, out_ch):
+    def __init__(self, out_ch, will_concat=True):
+        self.will_concat = will_concat
         layers = {}
         w = chainer.initializers.Normal(0.02)
+        channel_expansion = 2 if will_concat else 1
         layers['c0'] = CBR(512, 512, bn=True, sample='up', activation=F.relu, dropout=True)
-        layers['c1'] = CBR(1024, 512, bn=True, sample='up', activation=F.relu, dropout=True)
-        layers['c2'] = CBR(1024, 512, bn=True, sample='up', activation=F.relu, dropout=True)
-        layers['c3'] = CBR(1024, 512, bn=True, sample='up', activation=F.relu, dropout=False)
-        layers['c4'] = CBR(1024, 256, bn=True, sample='up', activation=F.relu, dropout=False)
-        layers['c5'] = CBR(512, 128, bn=True, sample='up', activation=F.relu, dropout=False)
-        layers['c6'] = CBR(256, 64, bn=True, sample='up', activation=F.relu, dropout=False)
-        layers['c7'] = F.Convolution2D(128, out_ch, 3, 1, 1, initialW=w)
+        layers['c1'] = CBR(512*channel_expansion, 512, bn=True, sample='up', activation=F.relu, dropout=True)
+        layers['c2'] = CBR(512*channel_expansion, 512, bn=True, sample='up', activation=F.relu, dropout=True)
+        layers['c3'] = CBR(512*channel_expansion, 512, bn=True, sample='up', activation=F.relu, dropout=False)
+        layers['c4'] = CBR(512*channel_expansion, 256, bn=True, sample='up', activation=F.relu, dropout=False)
+        layers['c5'] = CBR(256*channel_expansion, 128, bn=True, sample='up', activation=F.relu, dropout=False)
+        layers['c6'] = CBR(128*channel_expansion, 64, bn=True, sample='up', activation=F.relu, dropout=False)
+        layers['c7'] = L.Convolution2D(64*channel_expansion, out_ch, 3, 1, 1, initialW=w)
         super(Decoder, self).__init__(**layers)
 
     def __call__(self, hs, test=False):
         h = self.c0(hs[-1], test=test)
         for i in range(1,8):
-            h = F.concat([h, hs[-i-1]])
+            if self.will_concat:
+                h = F.concat([h, hs[-i-1]])
             if i<7:
                 h = self['c%d'%i](h, test=test)
             else:
@@ -84,19 +87,23 @@ class Decoder(chainer.Chain):
 
 
 class Discriminator(chainer.Chain):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, will_concat=True):
         layers = {}
+        self.will_concat=will_concat
+        channel_expansion = 2 if will_concat else 1
         w = chainer.initializers.Normal(0.02)
         layers['c0_0'] = CBR(in_ch, 32, bn=False, sample='down', activation=F.leaky_relu, dropout=False)
         layers['c0_1'] = CBR(out_ch, 32, bn=False, sample='down', activation=F.leaky_relu, dropout=False)
-        layers['c1'] = CBR(64, 128, bn=True, sample='down', activation=F.leaky_relu, dropout=False)
+        layers['c1'] = CBR(32*channel_expansion, 128, bn=True, sample='down', activation=F.leaky_relu, dropout=False)
         layers['c2'] = CBR(128, 256, bn=True, sample='down', activation=F.leaky_relu, dropout=False)
         layers['c3'] = CBR(256, 512, bn=True, sample='down', activation=F.leaky_relu, dropout=False)
-        layers['c4'] = F.Convolution2D(512, 1, 3, 1, 1, initialW=w)
+        layers['c4'] = L.Convolution2D(512, 1, 3, 1, 1, initialW=w)
         super(Discriminator, self).__init__(**layers)
 
     def __call__(self, x_0, x_1, test=False):
-        h = F.concat([self.c0_0(x_0, test=test), self.c0_1(x_1, test=test)])
+        h = self.c0_0(x_0, test=test)
+        if self.will_concat:
+            h = F.concat([h, self.c0_1(x_1, test=test)])
         h = self.c1(h, test=test)
         h = self.c2(h, test=test)
         h = self.c3(h, test=test)
