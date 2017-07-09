@@ -101,10 +101,12 @@ class Discriminator(chainer.Chain):
         super(Discriminator, self).__init__(**layers)
 
     def __call__(self, x_0, x_1, test=False):
+        hs = []
         h = self.c0_0(x_0, test=test)
         if self.will_concat:
             h = F.concat([h, self.c0_1(x_1, test=test)])
         h = self.c1(h, test=test)
+        # hs.append(chainer.functions.average_pooling_2d
         h = self.c2(h, test=test)
         h = self.c3(h, test=test)
         h = self.c4(h)
