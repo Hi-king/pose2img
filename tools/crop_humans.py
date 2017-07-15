@@ -18,6 +18,6 @@ for keypoint_path in glob.glob("{}/*.json".format(args.keypoints_directory)):
     baseid = basename.split("_")[0]
     print(baseid)
 
-    source_path = "{}/{}.jpg".format(args.source_directory, baseid)
+    source_path = "{}/{}.png".format(args.source_directory, baseid)
     target_path = "{}/{}.png".format(args.target_directory, baseid)
     pose2img.utility.crop_human(keypoint_path, source_path, target_path)

@@ -21,6 +21,7 @@ parser.add_argument("--random_input", action="store_true")
 parser.add_argument("--generator_bias", type=float, default=100)
 parser.add_argument("--no_concat_decoder", action="store_false", dest="concat_decoder")
 parser.add_argument("--no_concat_discriminator", action="store_false", dest="concat_discriminator")
+parser.add_argument("--noise_dimention", default=0, type=int)
 args = parser.parse_args()
 
 outdirname = "_".join([
@@ -32,6 +33,7 @@ outdirname = "_".join([
                           "generator_bias" + str(args.generator_bias),
                           "no_concat_decoder" if not args.concat_decoder else "",
                           "no_concat_discriminator" if not args.concat_discriminator else "",
+                          "noise{}".format(args.noise_dimention) if args.noise_dimention > 0 else "",
                           str(int(time.time())),
                       ] | pipe.where(lambda x: len(x) > 0))
 OUTPUT_DIRECTORY = os.path.join(os.path.dirname(__file__), "output", outdirname)
@@ -63,9 +65,20 @@ else:
         crop=256
     )
 
+if args.gpu >= 0:
+    chainer.cuda.check_cuda_available()
+    chainer.cuda.get_device(args.gpu).use()
+    xp = chainer.cuda.cupy
+else:
+    xp = numpy
+
+
 in_channel = 12 if args.facade else 3
 encoder = pose2img.models.Encoder(in_ch=in_channel)
-decoder = pose2img.models.Decoder(out_ch=3, will_concat=args.concat_decoder)
+if args.noise_dimention > 0:
+    decoder = pose2img.models.NoiseDecoder(noise_dimention=args.noise_dimention, out_ch=3, will_concat=args.concat_decoder)
+else:
+    decoder = pose2img.models.Decoder(out_ch=3, will_concat=args.concat_decoder)
 discriminator = pose2img.models.Discriminator(in_ch=in_channel, out_ch=3, will_concat=args.concat_discriminator)
 
 
@@ -90,14 +103,9 @@ optimizer_discriminator = make_optimizer(discriminator)
 adversarial_ratio = args.adversarial_ratio
 
 if args.gpu >= 0:
-    chainer.cuda.check_cuda_available()
-    chainer.cuda.get_device(args.gpu).use()
     encoder.to_gpu()
     decoder.to_gpu()
     discriminator.to_gpu()
-    xp = chainer.cuda.cupy
-else:
-    xp = numpy
 
 iterator = chainer.iterators.SerialIterator(dataset, batch_size=args.batchsize, repeat=True, shuffle=True)
 for i, batch in enumerate(iterator):
@@ -137,7 +145,7 @@ for i, batch in enumerate(iterator):
     loss_discriminator.backward()
     optimizer_discriminator.update()
 
-    save_span = 200
+    save_span = 2000
     report_span = 10
     count_processed = i * batchsize
     if i % report_span == 0:
