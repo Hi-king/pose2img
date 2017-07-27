@@ -29,10 +29,10 @@ class CBR(chainer.Chain):
             layers['batchnorm'] = L.BatchNormalization(ch1)
         super(CBR, self).__init__(**layers)
 
-    def __call__(self, x, test):
+    def __call__(self, x):
         h = self.c(x)
         if self.bn:
-            h = self.batchnorm(h, test=test)
+            h = self.batchnorm(h)
         if self.dropout:
             h = F.dropout(h)
         if not self.activation is None:
@@ -54,10 +54,10 @@ class Encoder(chainer.Chain):
         layers['c7'] = CBR(512, 512, bn=True, sample='down', activation=F.leaky_relu, dropout=False)
         super(Encoder, self).__init__(**layers)
 
-    def __call__(self, x, test=False):
+    def __call__(self, x):
         hs = [F.leaky_relu(self.c0(x))]
         for i in range(1, 8):
-            hs.append(self['c%d' % i](hs[i - 1], test=test))
+            hs.append(self['c%d' % i](hs[i - 1]))
         return hs
 
 
@@ -77,13 +77,13 @@ class Decoder(chainer.Chain):
         layers['c7'] = L.Convolution2D(64 * channel_expansion, out_ch, 3, 1, 1, initialW=w)
         super(Decoder, self).__init__(**layers)
 
-    def __call__(self, hs, test=False):
-        h = self.c0(hs[-1], test=test)
+    def __call__(self, hs):
+        h = self.c0(hs[-1])
         for i in range(1, 8):
             if self.will_concat:
                 h = F.concat([h, hs[-i - 1]])
             if i < 7:
-                h = self['c%d' % i](h, test=test)
+                h = self['c%d' % i](h)
             else:
                 h = self.c7(h)
         return h
@@ -94,14 +94,17 @@ class NoiseDecoder(Decoder):
         super().__init__(in_ch=(noise_dimention + 512), **kwargs)
         self.noise_dimention = noise_dimention
 
+    def create_noise(self, shape):
+        batchsize, ch, width, height = shape
+        noise_seed = self.xp.array(self.xp.random.uniform(-1, 1, (batchsize, self.noise_dimention)),
+                                   dtype=self.xp.float32)
+        noise = chainer.Variable(self.xp.tile(noise_seed, (width, height, 1, 1)).transpose((2, 3, 0, 1)))
+        return noise
+
     def __call__(self, hs, noise=None, *args, **kwargs):
         h = hs[-1]
-        batchsize, ch, width, height = h.shape
         if noise is None:
-            noise_seed = self.xp.array(self.xp.random.uniform(-1, 1, (batchsize, self.noise_dimention)),
-                                       dtype=self.xp.float32)
-            noise = chainer.Variable(self.xp.tile(noise_seed, (width, height, 1, 1)).transpose((2, 3, 0, 1)))
-
+            noise = self.create_noise(h.shape)
         hs_copy = [h_orig for h_orig in hs]
         hs_copy[-1] = chainer.functions.concat(
             (h, noise)
@@ -123,15 +126,15 @@ class Discriminator(chainer.Chain):
         layers['c4'] = L.Convolution2D(512, 1, 3, 1, 1, initialW=w)
         super(Discriminator, self).__init__(**layers)
 
-    def __call__(self, x_0, x_1, test=False):
+    def __call__(self, x_0, x_1):
         hs = []
-        h = self.c0_0(x_0, test=test)
+        h = self.c0_0(x_0)
         if self.will_concat:
-            h = F.concat([h, self.c0_1(x_1, test=test)])
-        h = self.c1(h, test=test)
+            h = F.concat([h, self.c0_1(x_1)])
+        h = self.c1(h)
         # hs.append(chainer.functions.average_pooling_2d
-        h = self.c2(h, test=test)
-        h = self.c3(h, test=test)
+        h = self.c2(h)
+        h = self.c3(h)
         h = self.c4(h)
         # h = F.average_pooling_2d(h, h.data.shape[2], 1, 0)
         return h
