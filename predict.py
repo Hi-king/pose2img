@@ -18,7 +18,8 @@ chainer.serializers.load_npz(args.decoder, decoder)
 
 variable = pose2img.utility.image2variable(args.image)
 
-converted = decoder(encoder(variable, test=True), test=True)
+with chainer.using_config('train', False):
+    converted = decoder(encoder(variable))
 
 image = pose2img.utility.variable2img(converted)
 image.save(args.outfile)
