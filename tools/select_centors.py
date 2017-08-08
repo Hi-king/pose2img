@@ -20,8 +20,8 @@ for keypoint_path in glob.glob("{}/*.json".format(args.keypoints_directory)):
     baseid = basename.split("_")[0]
     print(baseid)
 
-    source_path = "{}/{}.png".format(args.source_directory, baseid)
-    target_path = "{}/{}.png".format(args.target_directory, baseid)
+    source_path = glob.glob("{}/{}*".format(args.source_directory, baseid))[0]
+    target_path = os.path.join(args.target_directory, os.path.basename(source_path))
 
     # 画面に一人
     if not len(peoples) == 1:

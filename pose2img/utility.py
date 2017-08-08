@@ -4,6 +4,7 @@ import numpy
 import chainer
 import cv2
 import json
+import typing
 
 
 def image2variable(path, resize=(256, 256)):
@@ -19,9 +20,24 @@ def clip_img(x):
 
 
 def variable2img(x) -> Image.Image:
-    data = (numpy.vectorize(clip_img)(chainer.cuda.to_cpu(x.data)[0, :, :, :])).transpose(1, 2, 0)
+    return array2img(x.data[0])
+
+
+def array2img(x) -> Image.Image:
+    data = (numpy.vectorize(clip_img)(chainer.cuda.to_cpu(x))).transpose(1, 2, 0)
     img = Image.fromarray(numpy.uint8((data + 1) * 128))
     return img
+
+
+def concat_images(images: typing.List[Image.Image], layout: typing.Tuple[int, int]) -> Image.Image:
+    col, row = layout
+    single_width, single_height = images[0].size
+    result_img = Image.new(images[0].mode, (single_width * col, single_height * row))
+    for col_index in range(col):
+        for row_index in range(row):
+            image = images[col_index * row + row_index]
+            result_img.paste(image, (col_index * single_width, row_index * single_height))
+    return result_img
 
 
 def crop_human(json_path, img_path, output_path):

@@ -2,8 +2,8 @@
 """
 @see https://raw.githubusercontent.com/pfnet-research/chainer-pix2pix/master/net.py
 """
-from __future__ import print_function
 import numpy
+import typing
 
 import chainer
 from chainer import cuda
@@ -113,8 +113,7 @@ class NoiseDecoder(Decoder):
 
 
 class Discriminator(chainer.Chain):
-    def __init__(self, in_ch, out_ch, will_concat=True):
-        layers = {}
+    def __init__(self, in_ch, out_ch, will_concat=True, layers={}):
         self.will_concat = will_concat
         channel_expansion = 2 if will_concat else 1
         w = chainer.initializers.Normal(0.02)
@@ -126,8 +125,7 @@ class Discriminator(chainer.Chain):
         layers['c4'] = L.Convolution2D(512, 1, 3, 1, 1, initialW=w)
         super(Discriminator, self).__init__(**layers)
 
-    def __call__(self, x_0, x_1):
-        hs = []
+    def __call__(self, x_0: chainer.Variable, x_1: chainer.Variable):
         h = self.c0_0(x_0)
         if self.will_concat:
             h = F.concat([h, self.c0_1(x_1)])
@@ -138,3 +136,27 @@ class Discriminator(chainer.Chain):
         h = self.c4(h)
         # h = F.average_pooling_2d(h, h.data.shape[2], 1, 0)
         return h
+
+
+class BranchDiscriminator(Discriminator):
+    def __init__(self, in_ch, out_ch, will_concat=True, layers={}):
+        layers['out_1'] = L.Linear(128, 1)
+        layers['out_2'] = L.Linear(256, 1)
+        super().__init__(in_ch, out_ch, will_concat, layers)
+
+    def __call__(self, x_0: chainer.Variable, x_1: chainer.Variable) -> typing.List[chainer.Variable]:
+        hs = []
+
+        h = self.c0_0(x_0)
+        if self.will_concat:
+            h = F.concat([h, self.c0_1(x_1)])
+
+        h = self.c1(h)
+        hs.append(self.out_1(chainer.functions.average_pooling_2d(h, (h.shape[2], h.shape[3]))))
+        # hs.append(chainer.functions.average_pooling_2d
+        h = self.c2(h)
+        hs.append(self.out_2(chainer.functions.average_pooling_2d(h, (h.shape[2], h.shape[3]))))
+        h = self.c3(h)
+        h = self.c4(h)
+        hs.append(h)
+        return hs
