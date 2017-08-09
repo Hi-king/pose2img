@@ -1,5 +1,7 @@
 # pose2img
 
+![](https://media.githubusercontent.com/media/Hi-king/pose2img/master/sample/images/movie_result.gif)
+
 ```
 python predict.py \
   sample/images/sample_pose.png \
