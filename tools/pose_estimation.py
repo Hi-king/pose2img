@@ -7,11 +7,13 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import pose2img
 
+
 def main(args: argparse.Namespace):
-    openpose = pose2img.posemodel.OpenPose(args.proto2d, args.model2d, thr=0.01)
+    openpose = pose2img.posemodel.OpenPose(args.proto2d, args.model2d, thr=0.03)
     img = cv2.imread(args.image)
     predicted = openpose.predict(img)
-    print(predicted)
+    result = openpose.show(predicted, img)
+    cv2.imwrite("result.png", result)
 
 
 if __name__ == '__main__':
