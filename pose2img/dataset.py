@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
+import glob
 import os
-
+import collections
 import numpy
 import six
+import random
+
+import tqdm
 from PIL import Image
 from chainer.dataset import dataset_mixin
 
@@ -89,16 +93,50 @@ class ZippedPreprocessedDataset(dataset_mixin.DatasetMixin):
         return tuple(self.process_each(img, left, top, to_flip) for img in raws)
 
 
+class Market1501Dataset(dataset_mixin.DatasetMixin):
+    def __init__(self, data_dir):
+        """
+        :param data_dir: /mnt/dataset/Market-1501/Market-1501-v15.09.15/gt_bbox
+        """
+        pathdict = collections.defaultdict(list)
+        for path in tqdm.tqdm(list(glob.glob("{}/*.jpg".format(data_dir)))):
+            basename = os.path.basename(path)
+            uid = int(basename.split("_")[0])
+            pathdict[uid].append(path)
+        self.individuals = list(pathdict.values())
+
+    def __len__(self):
+        return len(self.individuals)
+
+    def get_example(self, i):
+        list = self.individuals[i]
+        random.shuffle(list)
+        x, y = list[:2]
+        x_item, y_item = self.get_img_pose(x), self.get_img_pose(y)
+
+        input_data = numpy.concatenate((x_item[0], x_item[1], y_item[1]), axis=2) # image, pose, pose
+        target_data = y_item[1]
+
+        return target_data.transpose(2, 0, 1), input_data.transpose(2, 0, 1)
+
+    def read_image(self, path):
+        return numpy.asarray(Image.open(path), dtype=numpy.float32)
+
+    def get_img_pose(self, image_path):
+        pose_path = os.path.splitext(image_path)[0] + "_pose.png"
+        return self.read_image(image_path), self.read_image(pose_path)
+
+
 class FacadeDataset(dataset_mixin.DatasetMixin):
-    def __init__(self, dataDir='./facade/base', data_range=(1, 300)):
+    def __init__(self, data_dir='./facade/base', data_range=(1, 300)):
         print("load dataset start")
-        print("    from: %s" % dataDir)
+        print("    from: %s" % data_dir)
         print("    range: [%d, %d)" % (data_range[0], data_range[1]))
-        self.dataDir = dataDir
+        self.dataDir = data_dir
         self.dataset = []
         for i in range(data_range[0], data_range[1]):
-            img = Image.open(dataDir + "/cmp_b%04d.jpg" % i)
-            label = Image.open(dataDir + "/cmp_b%04d.png" % i)
+            img = Image.open(data_dir + "/cmp_b%04d.jpg" % i)
+            label = Image.open(data_dir + "/cmp_b%04d.png" % i)
             w, h = img.size
             r = 286 / min(w, h)
             # resize images so that min(w, h) == 286

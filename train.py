@@ -11,13 +11,13 @@ import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--image_dataset", required=True)
-parser.add_argument("--pose_dataset", required=True)
+parser.add_argument("--pose_dataset", required=False)
 parser.add_argument("--gpu", type=int, default=-1)
 parser.add_argument("--batchsize", type=int, default=10)
 parser.add_argument("--adversarial_ratio", type=float, default=0.01)
 parser.add_argument("--adversarial_branch", action="store_true")
 parser.add_argument("--outprefix", default="")
-parser.add_argument("--facade", action="store_true")
+parser.add_argument("--dataset", choices=("image", "facade", "market1501"))
 parser.add_argument("--random_input", action="store_true")
 parser.add_argument("--generator_bias", type=float, default=100)
 parser.add_argument("--no_concat_decoder", action="store_false", dest="concat_decoder")
@@ -27,7 +27,7 @@ args = parser.parse_args()
 
 outdirname = "_".join([
                           args.outprefix,
-                          "facade" if args.facade else "",
+                          args.dataset if not args.dataset == "image" else "",
                           "random_input" if args.random_input else "",
                           "batch" + str(args.batchsize),
                           "ar" + str(args.adversarial_ratio),
@@ -45,9 +45,18 @@ console = logging.StreamHandler()
 logging.getLogger('').addHandler(console)
 logging.info(args)
 
-if args.facade:
-    dataset = pose2img.dataset.FacadeDataset(dataDir=args.image_dataset)
+if args.dataset == "facade":
+    dataset = pose2img.dataset.FacadeDataset(data_dir=args.image_dataset)
+    in_channel = 12
+    n_layer = 8
+elif args.dataset == "market1501":
+    dataset = pose2img.dataset.Market1501Dataset(data_dir=args.image_dataset)
+    in_channel = 3 * 3
+    n_layer = 7
 else:
+    in_channel = 3
+    n_layer = 8
+    assert args.pose_dataset is not None
     image_pathes_all = glob.glob("{}/*".format(args.image_dataset))
     image_ids = [os.path.splitext(os.path.basename(path))[0] for path in image_pathes_all]
     print(len(image_ids))
@@ -74,13 +83,12 @@ if args.gpu >= 0:
 else:
     xp = numpy
 
-in_channel = 12 if args.facade else 3
-encoder = pose2img.models.Encoder(in_ch=in_channel)
+encoder = pose2img.models.Encoder(in_ch=in_channel, n_Layer=n_layer)
 if args.noise_dimention > 0:
     decoder = pose2img.models.NoiseDecoder(noise_dimention=args.noise_dimention, out_ch=3,
                                            will_concat=args.concat_decoder)
 else:
-    decoder = pose2img.models.Decoder(out_ch=3, will_concat=args.concat_decoder)
+    decoder = pose2img.models.Decoder(out_ch=3, will_concat=args.concat_decoder, n_Layer=n_layer)
 
 if args.adversarial_branch:
     discriminator = pose2img.models.BranchDiscriminator(in_ch=in_channel, out_ch=3,
@@ -113,12 +121,16 @@ iterator = chainer.iterators.SerialIterator(dataset, batch_size=args.batchsize, 
 def calc_adversarial_loss(target_variable: chainer.Variable, is_branch: bool, is_positive: bool):
     sign = 1 if is_positive else -1
     if is_branch:
-        loss_adversarial = chainer.functions.sum(chainer.functions.softplus(sign * target_variable[0])) / batchsize / w / h
-        loss_adversarial += chainer.functions.sum(chainer.functions.softplus(sign * target_variable[1])) / batchsize / w / h
-        loss_adversarial += chainer.functions.sum(chainer.functions.softplus(sign * target_variable[2])) / batchsize / w / h
+        loss_adversarial = chainer.functions.sum(
+            chainer.functions.softplus(sign * target_variable[0])) / batchsize / w / h
+        loss_adversarial += chainer.functions.sum(
+            chainer.functions.softplus(sign * target_variable[1])) / batchsize / w / h
+        loss_adversarial += chainer.functions.sum(
+            chainer.functions.softplus(sign * target_variable[2])) / batchsize / w / h
     else:
         loss_adversarial = chainer.functions.sum(chainer.functions.softplus(sign * target_variable)) / batchsize / w / h
     return loss_adversarial
+
 
 with chainer.using_config('train', True):
     for i, batch in enumerate(iterator):
@@ -139,19 +151,19 @@ with chainer.using_config('train', True):
             images
         )
 
-
         loss_adversarial = calc_adversarial_loss(y_decoded, is_branch=args.adversarial_branch, is_positive=False)
         # loss_adversarial = chainer.functions.sum(chainer.functions.softplus(-y_decoded)) / batchsize / w / h
 
         encoder.cleargrads()
         decoder.cleargrads()
         loss_generator = args.generator_bias * (
-            loss_reconstruction * (1 - adversarial_ratio) + loss_adversarial * adversarial_ratio)
+                loss_reconstruction * (1 - adversarial_ratio) + loss_adversarial * adversarial_ratio)
         loss_generator.backward()
         optimizer_decoder.update()
         optimizer_encoder.update()
 
-        loss_discriminator_decoded = calc_adversarial_loss(y_decoded, is_branch=args.adversarial_branch, is_positive=True)
+        loss_discriminator_decoded = calc_adversarial_loss(y_decoded, is_branch=args.adversarial_branch,
+                                                           is_positive=True)
         loss_discriminator_true = calc_adversarial_loss(y_true, is_branch=args.adversarial_branch, is_positive=False)
         decoded.unchain_backward()
         poses.unchain_backward()
@@ -169,7 +181,7 @@ with chainer.using_config('train', True):
         if i % save_span == 0:
             with chainer.using_config('train', True):
                 converted = decoder(encoder(poses))
-            if not args.facade:
+            if args.dataset == "image":
                 input = pose2img.utility.variable2img(poses)
                 input.save(os.path.join(OUTPUT_DIRECTORY, "input_image_{}.png".format(count_processed)))
             image = pose2img.utility.variable2img(converted)
