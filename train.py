@@ -173,7 +173,7 @@ with chainer.using_config('train', True):
         optimizer_discriminator.update()
 
         save_span = 2000
-        report_span = 10
+        report_span = 100
         count_processed = i * batchsize
         if i % report_span == 0:
             logging.info("{}: gen={} dis={}".format(count_processed, loss_generator.data, loss_discriminator.data))
@@ -183,6 +183,11 @@ with chainer.using_config('train', True):
                 converted = decoder(encoder(poses))
             if args.dataset == "image":
                 input = pose2img.utility.variable2img(poses)
+                input.save(os.path.join(OUTPUT_DIRECTORY, "input_image_{}.png".format(count_processed)))
+            elif args.dataset == "market1501":
+                splitted = numpy.split(chainer.cuda.to_cpu(poses.data), indices_or_sections=3, axis=1)
+                input = numpy.concatenate((splitted[0], splitted[1], splitted[2]), axis=3)
+                input = pose2img.utility.array2img(input[0])
                 input.save(os.path.join(OUTPUT_DIRECTORY, "input_image_{}.png".format(count_processed)))
             image = pose2img.utility.variable2img(converted)
             image.save(os.path.join(OUTPUT_DIRECTORY, "output_image_{}.png".format(count_processed)))
