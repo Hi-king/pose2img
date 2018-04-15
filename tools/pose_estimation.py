@@ -1,11 +1,10 @@
 import argparse
 import glob
+import os
+import sys
 
 import cv2
-import sys
-import json
 import numpy
-import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import pose2img

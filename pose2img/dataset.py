@@ -1,14 +1,7 @@
 # -*- coding: utf-8 -*-
-import glob
-import os
-import collections
-
-import cv2
 import numpy
 import six
-import random
-
-import tqdm
+from .datasets import Market1501Dataset
 from PIL import Image
 from chainer.dataset import dataset_mixin
 
@@ -93,56 +86,6 @@ class ZippedPreprocessedDataset(dataset_mixin.DatasetMixin):
         top = numpy.random.randint(0, height - self.crop)
         to_flip = (numpy.random.randint(2) == 0)
         return tuple(self.process_each(img, left, top, to_flip) for img in raws)
-
-
-class Market1501Dataset(dataset_mixin.DatasetMixin):
-    def __init__(self, data_dir):
-        """
-        :param data_dir: /mnt/dataset/Market-1501/Market-1501-v15.09.15/gt_bbox
-        """
-        self.pose_dir = data_dir + "_openpose"
-        pathdict = collections.defaultdict(list)
-        for path in tqdm.tqdm(list(glob.glob("{}/*.jpg".format(data_dir)))):
-            basename = os.path.basename(path)
-            uid = int(basename.split("_")[0])
-            pathdict[uid].append(path)
-        self.individuals = list(pathdict.values())
-
-    def __len__(self):
-        return len(self.individuals)
-
-    def get_example(self, i):
-        list = self.individuals[i]
-        random.shuffle(list)
-        x, y = list[:2]
-        x_item, y_item = self.get_img_pose(x), self.get_img_pose(y)
-
-        input_data = numpy.concatenate((x_item[0], x_item[1], y_item[1]), axis=2)  # image, pose, pose
-        target_data = y_item[0]
-
-        return target_data.transpose(2, 0, 1), input_data.transpose(2, 0, 1)
-
-    def read_image(self, path):
-        return numpy.asarray(Image.open(path), dtype=numpy.float32)
-
-    def resize_pose_with_reference(self, image, pose):
-        h, w = image.shape[:2]
-        rh, rw = pose.shape[:2]
-        return cv2.resize(pose, (int(rw * float(h) / rh), h))[:, :w, :]
-
-    def normalize(self, data):
-        return (data - 128) / 128
-
-    def get_img_pose(self, image_path):
-        basename = os.path.basename(image_path)
-        pose_path = os.path.join(
-            self.pose_dir,
-            os.path.splitext(basename)[0] + "_rendered.png")
-
-        image = self.read_image(image_path)
-        pose = self.read_image(pose_path)
-        pose = self.resize_pose_with_reference(image, pose)
-        return self.normalize(image), self.normalize(pose)
 
 
 class FacadeDataset(dataset_mixin.DatasetMixin):
